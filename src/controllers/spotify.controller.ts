@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { SpotifyService } from '../services/spotify.service';
-import ytdl from '@distube/ytdl-core';
+import { exec } from 'youtube-dl-exec';
 
 const spotifyService = new SpotifyService();
 
@@ -32,19 +32,29 @@ export const streamTrack = async (req: Request, res: Response): Promise<void> =>
 
   try {
     const url = `https://www.youtube.com/watch?v=${videoId}`;
-    const isValid = ytdl.validateURL(url);
-    if (!isValid) {
-      res.status(400).json({ error: "Invalid YouTube URL." });
-      return;
-    }
+    
+    // expo-av accepts m4a or mp3 streams well
+    res.header('Content-Type', 'audio/mp4');
+    
+    const subprocess = exec(url, {
+      format: 'bestaudio[ext=m4a]/bestaudio',
+      output: '-',
+      noWarnings: true,
+      noCallHome: true,
+      youtubeSkipDashManifest: true,
+    });
+    
+    subprocess.stdout.pipe(res);
+    
+    subprocess.on('error', (err) => {
+      console.error("[Audio Stream] Error:", err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Internal Server Error", message: err.message });
+      }
+    });
 
-    res.header('Content-Type', 'audio/mpeg');
-    ytdl(url, {
-      filter: 'audioonly',
-      quality: 'highestaudio'
-    }).pipe(res);
   } catch (error: any) {
-    console.error("[Audio Stream] Error:", error);
+    console.error("[Audio Stream] Exception:", error);
     if (!res.headersSent) {
       res.status(500).json({ error: "Internal Server Error", message: error.message });
     }

@@ -9,11 +9,12 @@
     "dev": "ts-node src/server.ts"
   },
   "dependencies": {
-    "@distube/ytdl-core": "^4.16.12",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
-    "multer": "^1.4.5-lts.1"
+    "multer": "^1.4.5-lts.1",
+    "play-dl": "^1.9.7",
+    "youtube-dl-exec": "^3.1.9"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
