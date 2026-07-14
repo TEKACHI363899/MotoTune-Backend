@@ -37,11 +37,12 @@ export const streamTrack = async (req: Request, res: Response): Promise<void> =>
     res.header('Content-Type', 'audio/mp4');
     
     const subprocess = exec(url, {
-      format: 'bestaudio[ext=m4a]/bestaudio',
+      format: 'bestaudio/best', // fallback to best (format 18) if bestaudio is missing on android client
       output: '-',
       noWarnings: true,
       callHome: false,
       youtubeSkipDashManifest: true,
+      extractorArgs: 'youtube:player_client=android', // Bypass YouTube 403 Forbidden globally
     } as any); // Cast to any to bypass strict Flags type check for obscure options
     
     if (subprocess.stdout) {

@@ -4,10 +4,11 @@ const fs = require('fs');
 async function test() {
     console.log("Starting stream via yt-dlp...");
     const subprocess = exec('https://www.youtube.com/watch?v=FvOpPeKSf_4', {
-        format: 'bestaudio',
+        format: 'bestaudio/best',
         output: '-',
         noWarnings: true,
-        noCallHome: true,
+        callHome: false,
+        extractorArgs: 'youtube:player_client=android',
     });
     
     subprocess.stdout.pipe(fs.createWriteStream('test_audio.mp3'));
