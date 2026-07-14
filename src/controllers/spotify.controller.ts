@@ -40,11 +40,15 @@ export const streamTrack = async (req: Request, res: Response): Promise<void> =>
       format: 'bestaudio[ext=m4a]/bestaudio',
       output: '-',
       noWarnings: true,
-      noCallHome: true,
+      callHome: false,
       youtubeSkipDashManifest: true,
-    });
+    } as any); // Cast to any to bypass strict Flags type check for obscure options
     
-    subprocess.stdout.pipe(res);
+    if (subprocess.stdout) {
+      subprocess.stdout.pipe(res);
+    } else {
+      throw new Error("Failed to initialize audio stream pipeline (stdout is null)");
+    }
     
     subprocess.on('error', (err) => {
       console.error("[Audio Stream] Error:", err);
