@@ -9,6 +9,7 @@ import fs from 'fs';
 dotenv.config();
 
 import { GeminiController } from './controllers/gemini.controller';
+import { searchTracks, streamTrack } from './controllers/spotify.controller';
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -42,6 +43,10 @@ const geminiController = new GeminiController();
 app.post('/api/gemini/scan-odo', (req, res) => geminiController.scanOdo(req, res));
 app.post('/api/gemini/chat', (req, res) => geminiController.chat(req, res));
 app.post('/api/gemini/diagnose-video', upload.single('video'), (req, res) => geminiController.diagnoseVideo(req, res));
+
+// Define Spotify API Search endpoint
+app.get('/api/spotify/search', (req, res) => searchTracks(req, res));
+app.get('/api/spotify/stream/:videoId', (req, res) => streamTrack(req, res));
 
 // Health check endpoint
 app.get('/health', (req, res) => {
