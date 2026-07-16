@@ -31,62 +31,65 @@ export const streamTrack = async (req: Request, res: Response): Promise<void> =>
   }
 
   const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  const cobaltApis = [
+    'https://api.cobalt.liubquanti.click',
+    'https://subito-c.meowing.de',
+    'https://api.qwkuns.me'
+  ];
 
-  try {
-    console.log(`[Audio Stream] Resolving stream for videoId: ${videoId}`);
-    
-    // 1. Fetch current working cobalt instances from the directory
-    const dirRes = await fetch('https://cobalt.directory/api/working?type=api');
-    if (!dirRes.ok) {
-      throw new Error(`Failed to fetch cobalt directory, status: ${dirRes.status}`);
-    }
-    
-    const dirData = (await dirRes.json()) as any;
-    const apis: string[] = dirData.data?.youtube || [];
-    
-    if (apis.length === 0) {
-      throw new Error("No active YouTube cobalt instances found in directory");
-    }
+  // 1. Try public Cobalt instances first (no datacenter IP block, very light on Render RAM)
+  for (const api of cobaltApis) {
+    try {
+      console.log(`[Audio Stream] Attempting Cobalt API: ${api}`);
+      const response = await fetch(api, {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          url: videoUrl,
+          downloadMode: 'audio',
+          isAudioOnly: true,
+          audioFormat: 'mp3'
+        }),
+        signal: AbortSignal.timeout(6000)
+      });
 
-    // 2. Iterate and find a working public instance
-    for (const api of apis) {
-      try {
-        console.log(`[Audio Stream] Attempting Cobalt API: ${api}`);
-        const response = await fetch(api, {
-          method: 'POST',
-          headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            url: videoUrl,
-            downloadMode: 'audio',
-            audioFormat: 'mp3'
-          }),
-          signal: AbortSignal.timeout(6000) // Timeout after 6 seconds to avoid hanging
-        });
-
-        if (response.ok) {
-          const data = (await response.json()) as any;
-          if (data.url) {
-            console.log(`[Audio Stream] Redirection successful. Direct URL: ${data.url.substring(0, 80)}...`);
-            res.redirect(data.url);
-            return;
-          }
-        } else {
-          console.warn(`[Audio Stream] API ${api} returned status: ${response.status}`);
+      if (response.ok) {
+        const data = (await response.json()) as any;
+        if (data.url) {
+          console.log(`[Audio Stream] Cobalt success (${api}). Redirecting to: ${data.url.substring(0, 80)}...`);
+          res.redirect(data.url);
+          return;
         }
-      } catch (err: any) {
-        console.warn(`[Audio Stream] API ${api} failed: ${err.message}`);
       }
+    } catch (err: any) {
+      console.warn(`[Audio Stream] Cobalt ${api} failed: ${err.message}`);
     }
+  }
 
-    throw new Error("All active Cobalt instances failed to extract direct URL");
+  // 2. Fallback to local youtube-dl-exec extraction (useful if running backend locally via ngrok/localtunnel)
+  try {
+    console.log(`[Audio Stream] Cobalt failed. Falling back to local yt-dlp extraction...`);
+    const info = await youtubeDl(videoUrl, {
+      dumpSingleJson: true,
+      noWarnings: true,
+      extractorArgs: 'youtube:player_client=android',
+      format: 'bestaudio/best',
+    } as any);
 
-  } catch (error: any) {
-    console.error("[Audio Stream] Failover Exception:", error.message || error);
-    if (!res.headersSent) {
-      res.status(500).json({ error: "Internal Server Error", message: error.message || "Failed to extract audio URL" });
+    const directUrl = (info as any).url || (info as any).requested_downloads?.[0]?.url;
+    if (directUrl) {
+      console.log(`[Audio Stream] yt-dlp success. Redirecting to direct URL.`);
+      res.redirect(directUrl);
+      return;
     }
+  } catch (err: any) {
+    console.error(`[Audio Stream] yt-dlp fallback failed: ${err.message}`);
+  }
+
+  if (!res.headersSent) {
+    res.status(500).json({ error: "Internal Server Error", message: "Failed to extract streaming URL from all sources." });
   }
 };
