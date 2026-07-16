@@ -30,41 +30,61 @@ export const streamTrack = async (req: Request, res: Response): Promise<void> =>
     return;
   }
 
-  try {
-    const url = `https://www.youtube.com/watch?v=${videoId}`;
-    
-    // Use yt-dlp to extract the direct audio URL (no binary piping through server)
-    const info = await youtubeDl(url, {
-      dumpSingleJson: true,
-      noWarnings: true,
-      extractorArgs: 'youtube:player_client=android',
-      format: 'bestaudio/best',
-    } as any);
+  const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
 
-    // info is the parsed JSON with format details
-    const directUrl = (info as any).url || (info as any).requested_downloads?.[0]?.url;
+  try {
+    console.log(`[Audio Stream] Resolving stream for videoId: ${videoId}`);
     
-    if (!directUrl) {
-      // Fallback: find a format with a URL in the formats array
-      const formats = (info as any).formats;
-      if (formats && formats.length > 0) {
-        // Prefer audio-only, fallback to any with a URL
-        const audioFormat = formats.find((f: any) => f.vcodec === 'none' && f.acodec !== 'none' && f.url)
-          || formats.find((f: any) => f.url);
-        if (audioFormat?.url) {
-          console.log(`[Audio Stream] Redirecting to format ${audioFormat.format_id}: ${audioFormat.url.substring(0, 80)}...`);
-          res.redirect(audioFormat.url);
-          return;
-        }
-      }
-      throw new Error("Could not extract audio URL from YouTube");
+    // 1. Fetch current working cobalt instances from the directory
+    const dirRes = await fetch('https://cobalt.directory/api/working?type=api');
+    if (!dirRes.ok) {
+      throw new Error(`Failed to fetch cobalt directory, status: ${dirRes.status}`);
+    }
+    
+    const dirData = (await dirRes.json()) as any;
+    const apis: string[] = dirData.data?.youtube || [];
+    
+    if (apis.length === 0) {
+      throw new Error("No active YouTube cobalt instances found in directory");
     }
 
-    console.log(`[Audio Stream] Redirecting to: ${directUrl.substring(0, 80)}...`);
-    res.redirect(directUrl);
+    // 2. Iterate and find a working public instance
+    for (const api of apis) {
+      try {
+        console.log(`[Audio Stream] Attempting Cobalt API: ${api}`);
+        const response = await fetch(api, {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            url: videoUrl,
+            downloadMode: 'audio',
+            audioFormat: 'mp3'
+          }),
+          signal: AbortSignal.timeout(6000) // Timeout after 6 seconds to avoid hanging
+        });
+
+        if (response.ok) {
+          const data = (await response.json()) as any;
+          if (data.url) {
+            console.log(`[Audio Stream] Redirection successful. Direct URL: ${data.url.substring(0, 80)}...`);
+            res.redirect(data.url);
+            return;
+          }
+        } else {
+          console.warn(`[Audio Stream] API ${api} returned status: ${response.status}`);
+        }
+      } catch (err: any) {
+        console.warn(`[Audio Stream] API ${api} failed: ${err.message}`);
+      }
+    }
+
+    throw new Error("All active Cobalt instances failed to extract direct URL");
 
   } catch (error: any) {
-    console.error("[Audio Stream] Exception:", error.message || error);
+    console.error("[Audio Stream] Failover Exception:", error.message || error);
     if (!res.headersSent) {
       res.status(500).json({ error: "Internal Server Error", message: error.message || "Failed to extract audio URL" });
     }
