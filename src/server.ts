@@ -48,6 +48,43 @@ app.post('/api/gemini/diagnose-video', upload.single('video'), (req, res) => gem
 app.get('/api/spotify/search', (req, res) => searchTracks(req, res));
 app.get('/api/spotify/stream/:videoId', (req, res) => streamTrack(req, res));
 
+app.get('/api/debug-cobalt', async (req, res) => {
+  const videoUrl = 'https://www.youtube.com/watch?v=FvOpPeKSf_4';
+  const apis = [
+    'https://api.cobalt.liubquanti.click',
+    'https://subito-c.meowing.de',
+    'https://api.qwkuns.me'
+  ];
+  const logs: string[] = [];
+  
+  for (const api of apis) {
+    try {
+      logs.push(`Testing ${api}...`);
+      const response = await fetch(api, {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          url: videoUrl,
+          downloadMode: 'audio',
+          isAudioOnly: true,
+          audioFormat: 'mp3'
+        }),
+        signal: AbortSignal.timeout(5000)
+      });
+      logs.push(`Status: ${response.status}`);
+      const body = await response.text();
+      logs.push(`Body: ${body.substring(0, 200)}`);
+    } catch (e: any) {
+      logs.push(`Error on ${api}: ${e.message}`);
+    }
+  }
+  
+  res.json({ logs });
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ status: 'healthy', timestamp: Date.now() });
