@@ -35,26 +35,40 @@ export const streamTrack = async (req: Request, res: Response): Promise<void> =>
     
     // expo-av accepts m4a or mp3 streams well
     res.header('Content-Type', 'audio/mp4');
+    res.header('Transfer-Encoding', 'chunked');
     
     const subprocess = exec(url, {
-      format: 'bestaudio/best', // fallback to best (format 18) if bestaudio is missing on android client
+      format: 'bestaudio/best',
       output: '-',
       noWarnings: true,
-      callHome: false,
-      youtubeSkipDashManifest: true,
-      extractorArgs: 'youtube:player_client=android', // Bypass YouTube 403 Forbidden globally
-    } as any); // Cast to any to bypass strict Flags type check for obscure options
+      extractorArgs: 'youtube:player_client=android',
+    } as any);
     
     if (subprocess.stdout) {
       subprocess.stdout.pipe(res);
     } else {
       throw new Error("Failed to initialize audio stream pipeline (stdout is null)");
     }
+
+    if (subprocess.stderr) {
+      subprocess.stderr.on('data', (data: Buffer) => {
+        console.error(`[Audio Stream] yt-dlp stderr: ${data.toString()}`);
+      });
+    }
     
     subprocess.on('error', (err) => {
-      console.error("[Audio Stream] Error:", err);
+      console.error("[Audio Stream] Process error:", err);
       if (!res.headersSent) {
         res.status(500).json({ error: "Internal Server Error", message: err.message });
+      }
+    });
+
+    subprocess.on('close', (code) => {
+      if (code !== 0) {
+        console.error(`[Audio Stream] yt-dlp exited with code ${code}`);
+        if (!res.headersSent) {
+          res.status(500).json({ error: "Stream failed", message: `yt-dlp exited with code ${code}` });
+        }
       }
     });
 
