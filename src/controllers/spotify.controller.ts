@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { SpotifyService } from '../services/spotify.service';
-import { exec } from 'youtube-dl-exec';
+import youtubeDl from 'youtube-dl-exec';
 
 const spotifyService = new SpotifyService();
 
@@ -33,49 +33,40 @@ export const streamTrack = async (req: Request, res: Response): Promise<void> =>
   try {
     const url = `https://www.youtube.com/watch?v=${videoId}`;
     
-    // expo-av accepts m4a or mp3 streams well
-    res.header('Content-Type', 'audio/mp4');
-    res.header('Transfer-Encoding', 'chunked');
-    
-    const subprocess = exec(url, {
-      format: 'bestaudio/best',
-      output: '-',
+    // Use yt-dlp to extract the direct audio URL (no binary piping through server)
+    const info = await youtubeDl(url, {
+      dumpSingleJson: true,
       noWarnings: true,
       extractorArgs: 'youtube:player_client=android',
+      format: 'bestaudio/best',
     } as any);
-    
-    if (subprocess.stdout) {
-      subprocess.stdout.pipe(res);
-    } else {
-      throw new Error("Failed to initialize audio stream pipeline (stdout is null)");
-    }
 
-    if (subprocess.stderr) {
-      subprocess.stderr.on('data', (data: Buffer) => {
-        console.error(`[Audio Stream] yt-dlp stderr: ${data.toString()}`);
-      });
-    }
+    // info is the parsed JSON with format details
+    const directUrl = (info as any).url || (info as any).requested_downloads?.[0]?.url;
     
-    subprocess.on('error', (err) => {
-      console.error("[Audio Stream] Process error:", err);
-      if (!res.headersSent) {
-        res.status(500).json({ error: "Internal Server Error", message: err.message });
-      }
-    });
-
-    subprocess.on('close', (code) => {
-      if (code !== 0) {
-        console.error(`[Audio Stream] yt-dlp exited with code ${code}`);
-        if (!res.headersSent) {
-          res.status(500).json({ error: "Stream failed", message: `yt-dlp exited with code ${code}` });
+    if (!directUrl) {
+      // Fallback: find a format with a URL in the formats array
+      const formats = (info as any).formats;
+      if (formats && formats.length > 0) {
+        // Prefer audio-only, fallback to any with a URL
+        const audioFormat = formats.find((f: any) => f.vcodec === 'none' && f.acodec !== 'none' && f.url)
+          || formats.find((f: any) => f.url);
+        if (audioFormat?.url) {
+          console.log(`[Audio Stream] Redirecting to format ${audioFormat.format_id}: ${audioFormat.url.substring(0, 80)}...`);
+          res.redirect(audioFormat.url);
+          return;
         }
       }
-    });
+      throw new Error("Could not extract audio URL from YouTube");
+    }
+
+    console.log(`[Audio Stream] Redirecting to: ${directUrl.substring(0, 80)}...`);
+    res.redirect(directUrl);
 
   } catch (error: any) {
-    console.error("[Audio Stream] Exception:", error);
+    console.error("[Audio Stream] Exception:", error.message || error);
     if (!res.headersSent) {
-      res.status(500).json({ error: "Internal Server Error", message: error.message });
+      res.status(500).json({ error: "Internal Server Error", message: error.message || "Failed to extract audio URL" });
     }
   }
 };
