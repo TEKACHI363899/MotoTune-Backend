@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { SpotifyService } from '../services/spotify.service';
-import youtubeDl from 'youtube-dl-exec';
+import { exec } from 'youtube-dl-exec';
 
 const spotifyService = new SpotifyService();
 
@@ -30,66 +30,52 @@ export const streamTrack = async (req: Request, res: Response): Promise<void> =>
     return;
   }
 
-  const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
-  const cobaltApis = [
-    'https://api.cobalt.liubquanti.click',
-    'https://subito-c.meowing.de',
-    'https://api.qwkuns.me'
-  ];
+  try {
+    const url = `https://www.youtube.com/watch?v=${videoId}`;
+    
+    // Set headers for audio streaming
+    res.header('Content-Type', 'audio/mp4');
+    res.header('Transfer-Encoding', 'chunked');
+    
+    const subprocess = exec(url, {
+      format: 'bestaudio/best', // fallback to best if bestaudio is missing
+      output: '-',
+      noWarnings: true,
+      extractorArgs: 'youtube:player_client=android', // Bypass YouTube bot check
+    } as any);
+    
+    if (subprocess.stdout) {
+      subprocess.stdout.pipe(res);
+    } else {
+      throw new Error("Failed to initialize audio stream pipeline (stdout is null)");
+    }
 
-  // 1. Try public Cobalt instances first (no datacenter IP block, very light on Render RAM)
-  for (const api of cobaltApis) {
-    try {
-      console.log(`[Audio Stream] Attempting Cobalt API: ${api}`);
-      const response = await fetch(api, {
-        method: 'POST',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          url: videoUrl,
-          downloadMode: 'audio',
-          isAudioOnly: true,
-          audioFormat: 'mp3'
-        }),
-        signal: AbortSignal.timeout(6000)
+    if (subprocess.stderr) {
+      subprocess.stderr.on('data', (data: Buffer) => {
+        console.error(`[Audio Stream] yt-dlp stderr: ${data.toString()}`);
       });
+    }
+    
+    subprocess.on('error', (err) => {
+      console.error("[Audio Stream] Process error:", err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Internal Server Error", message: err.message });
+      }
+    });
 
-      if (response.ok) {
-        const data = (await response.json()) as any;
-        if (data.url) {
-          console.log(`[Audio Stream] Cobalt success (${api}). Redirecting to: ${data.url.substring(0, 80)}...`);
-          res.redirect(data.url);
-          return;
+    subprocess.on('close', (code) => {
+      if (code !== 0) {
+        console.error(`[Audio Stream] yt-dlp exited with code ${code}`);
+        if (!res.headersSent) {
+          res.status(500).json({ error: "Stream failed", message: `yt-dlp exited with code ${code}` });
         }
       }
-    } catch (err: any) {
-      console.warn(`[Audio Stream] Cobalt ${api} failed: ${err.message}`);
+    });
+
+  } catch (error: any) {
+    console.error("[Audio Stream] Exception:", error.message || error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: "Internal Server Error", message: error.message || "Failed to stream audio" });
     }
-  }
-
-  // 2. Fallback to local youtube-dl-exec extraction (useful if running backend locally via ngrok/localtunnel)
-  try {
-    console.log(`[Audio Stream] Cobalt failed. Falling back to local yt-dlp extraction...`);
-    const info = await youtubeDl(videoUrl, {
-      dumpSingleJson: true,
-      noWarnings: true,
-      extractorArgs: 'youtube:player_client=android',
-      format: 'bestaudio/best',
-    } as any);
-
-    const directUrl = (info as any).url || (info as any).requested_downloads?.[0]?.url;
-    if (directUrl) {
-      console.log(`[Audio Stream] yt-dlp success. Redirecting to direct URL.`);
-      res.redirect(directUrl);
-      return;
-    }
-  } catch (err: any) {
-    console.error(`[Audio Stream] yt-dlp fallback failed: ${err.message}`);
-  }
-
-  if (!res.headersSent) {
-    res.status(500).json({ error: "Internal Server Error", message: "Failed to extract streaming URL from all sources." });
   }
 };
